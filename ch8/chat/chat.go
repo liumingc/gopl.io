@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 )
 
 //!+broadcaster
@@ -56,15 +57,46 @@ func handleConn(conn net.Conn) {
 	messages <- who + " has arrived"
 	entering <- ch
 
-	input := bufio.NewScanner(conn)
-	for input.Scan() {
-		messages <- who + ": " + input.Text()
-	}
-	// NOTE: ignoring potential errors from input.Err()
+	ticker := time.NewTicker(5 * time.Second)
+	inch := make(chan string)
+	lastChatTime := time.Now()
 
+	go func() {
+		input := bufio.NewScanner(conn)
+		for input.Scan() {
+			inch <- who + ": " + input.Text()
+		}
+
+		// NOTE: ignoring potential errors from input.Err()
+
+	}()
+
+	for {
+		select {
+		case curr := <-ticker.C:
+			elapsed := curr.Sub(lastChatTime)
+			if elapsed > 5*time.Second {
+				fmt.Println("time out")
+				ch <- " You dont talk, knock you out"
+				messages <- who + " is knocked out"
+
+				goto L1
+			}
+
+		case words, ok := <-inch:
+			if !ok {
+				messages <- who + " has left"
+				goto L1
+			}
+			lastChatTime = time.Now()
+			messages <- who + ": " + words
+		}
+
+	}
+L1:
 	leaving <- ch
-	messages <- who + " has left"
 	conn.Close()
+	ticker.Stop()
 }
 
 func clientWriter(conn net.Conn, ch <-chan string) {
